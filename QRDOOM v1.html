@@ -1,0 +1,1088 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>QR://DOOM — FORBIDDEN BUILD v0.00.1</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=VT323&display=swap');
+
+  * { margin:0; padding:0; box-sizing:border-box; }
+
+  body {
+    background: #000;
+    color: #fff;
+    font-family: 'Share Tech Mono', monospace;
+    overflow: hidden;
+    cursor: none;
+  }
+
+  #boot-screen {
+    position: fixed; inset: 0;
+    background: #000;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    z-index: 100;
+    font-family: 'VT323', monospace;
+  }
+
+  #boot-text {
+    font-size: 14px;
+    color: #0f0;
+    width: 600px;
+    white-space: pre;
+    line-height: 1.3;
+    text-shadow: 0 0 8px #0f0;
+  }
+
+  #boot-title {
+    font-size: 52px;
+    color: #fff;
+    letter-spacing: 12px;
+    text-shadow: 0 0 20px #0f0, 0 0 40px #0f0;
+    margin-bottom: 20px;
+    animation: flicker 3s infinite;
+  }
+
+  @keyframes flicker {
+    0%,100%{opacity:1} 92%{opacity:1} 93%{opacity:0.4} 94%{opacity:1} 96%{opacity:0.8} 97%{opacity:1}
+  }
+
+  #start-prompt {
+    font-size: 28px;
+    color: #0f0;
+    margin-top: 30px;
+    animation: blink 1s step-end infinite;
+    text-shadow: 0 0 10px #0f0;
+  }
+  @keyframes blink { 50%{opacity:0} }
+
+  #game-container {
+    position: fixed; inset: 0;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    background: #000;
+  }
+
+  canvas {
+    display: block;
+    image-rendering: pixelated;
+  }
+
+  #overlay {
+    position: fixed; inset: 0;
+    pointer-events: none;
+    z-index: 10;
+  }
+
+  /* CRT scanlines */
+  #overlay::before {
+    content: '';
+    position: absolute; inset: 0;
+    background: repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 2px,
+      rgba(0,0,0,0.15) 2px,
+      rgba(0,0,0,0.15) 4px
+    );
+  }
+
+  /* Vignette */
+  #overlay::after {
+    content: '';
+    position: absolute; inset: 0;
+    background: radial-gradient(ellipse at center, transparent 60%, rgba(0,0,0,0.8) 100%);
+  }
+
+  #hud {
+    position: fixed;
+    bottom: 0; left: 0; right: 0;
+    height: 80px;
+    background: #000;
+    border-top: 2px solid #0f0;
+    display: none;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 30px;
+    font-family: 'VT323', monospace;
+    font-size: 28px;
+    z-index: 20;
+    box-shadow: 0 -4px 20px rgba(0,255,0,0.3);
+  }
+
+  .hud-block {
+    display: flex; flex-direction: column; align-items: center;
+  }
+
+  .hud-label { font-size: 14px; color: #0a0; letter-spacing: 3px; }
+  .hud-value { color: #0f0; text-shadow: 0 0 8px #0f0; }
+  .hud-value.danger { color: #f00; text-shadow: 0 0 8px #f00; animation: flicker 0.5s infinite; }
+
+  #crosshair {
+    position: fixed;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    width: 20px; height: 20px;
+    pointer-events: none;
+    z-index: 15;
+    display: none;
+  }
+  #crosshair::before, #crosshair::after {
+    content: '';
+    position: absolute;
+    background: rgba(0,255,0,0.8);
+  }
+  #crosshair::before { width:2px; height:100%; left:50%; top:0; transform:translateX(-50%); }
+  #crosshair::after  { width:100%; height:2px; top:50%; left:0; transform:translateY(-50%); }
+
+  #msg {
+    position: fixed;
+    top: 40%; left: 50%;
+    transform: translateX(-50%);
+    font-family: 'VT323', monospace;
+    font-size: 36px;
+    color: #0f0;
+    text-shadow: 0 0 15px #0f0;
+    z-index: 25;
+    text-align: center;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.3s;
+  }
+
+  #damage-flash {
+    position: fixed; inset: 0;
+    background: rgba(255,0,0,0);
+    pointer-events: none;
+    z-index: 30;
+    transition: background 0.1s;
+  }
+
+  #qr-corner {
+    position: fixed;
+    bottom: 90px; right: 10px;
+    width: 80px; height: 80px;
+    z-index: 20;
+    display: none;
+  }
+
+  #debug {
+    position: fixed;
+    top: 5px; left: 5px;
+    font-size: 10px;
+    color: #040;
+    z-index: 20;
+    font-family: 'Share Tech Mono', monospace;
+    pointer-events: none;
+    display: none;
+  }
+</style>
+</head>
+<body>
+
+<!-- BOOT SCREEN -->
+<div id="boot-screen">
+  <div id="boot-title">QR://DOOM</div>
+  <div id="boot-text" id="bt"></div>
+  <div id="start-prompt" style="display:none">[ PRESS ANY KEY TO JACK IN ]</div>
+</div>
+
+<!-- GAME -->
+<div id="game-container">
+  <canvas id="qr-canvas"></canvas>
+  <canvas id="qr-mini" id="qr-corner" width="80" height="80"></canvas>
+</div>
+
+<div id="overlay"></div>
+<div id="damage-flash"></div>
+<div id="crosshair"></div>
+
+<div id="hud">
+  <div class="hud-block">
+    <div class="hud-label">HEALTH</div>
+    <div class="hud-value" id="hud-hp">100</div>
+  </div>
+  <div class="hud-block">
+    <div class="hud-label">KILLS</div>
+    <div class="hud-value" id="hud-kills">000</div>
+  </div>
+  <div class="hud-block" style="text-align:center">
+    <div class="hud-label">QR://DOOM v0.00.1</div>
+    <div style="font-size:12px;color:#040;letter-spacing:2px">FORBIDDEN BUILD — DO NOT DISTRIBUTE</div>
+  </div>
+  <div class="hud-block">
+    <div class="hud-label">AMMO</div>
+    <div class="hud-value" id="hud-ammo">∞</div>
+  </div>
+  <div class="hud-block">
+    <div class="hud-label">WAVE</div>
+    <div class="hud-value" id="hud-wave">01</div>
+  </div>
+</div>
+
+<div id="msg"></div>
+<div id="debug" id="dbg"></div>
+
+<script>
+'use strict';
+
+// ═══════════════════════════════════════════════════════════════
+//  QR://DOOM  —  FORBIDDEN RAYCASTER
+//  Rendering pipeline: world → raycaster → QR matrix → canvas
+// ═══════════════════════════════════════════════════════════════
+
+const $ = id => document.getElementById(id);
+
+// ── CONFIG ──────────────────────────────────────────────────────
+const CFG = {
+  W: 800, H: 520,           // render resolution
+  QSIZE: 4,                 // QR module pixel size
+  FOV: Math.PI / 3,
+  DEPTH: 20,
+  MOVE_SPEED: 0.05,
+  ROT_SPEED: 0.04,
+  MOUSE_SENS: 0.0015,
+  SHOOT_COOLDOWN: 250,      // ms
+  ENEMY_SPEED: 0.015,
+  MAX_ENEMIES: 12,
+};
+
+// Derived
+CFG.COLS = Math.floor(CFG.W / CFG.QSIZE);
+CFG.ROWS = Math.floor(CFG.H / CFG.QSIZE);
+
+// ── MAP ─────────────────────────────────────────────────────────
+// 0=floor, 1-9=wall types
+const RAW_MAP = [
+  "111111111111111111111",
+  "100000000100000000001",
+  "100000000100000000001",
+  "100000000000000000001",
+  "100000000100000000001",
+  "100000000100000000001",
+  "111100000000000111001",
+  "100000000000000001001",
+  "100010000000000001001",
+  "100010001110000001001",
+  "100010000000000001001",
+  "100010000000000000001",
+  "100000000000000000001",
+  "100000001111100000001",
+  "100000000000000000001",
+  "100000000000000000001",
+  "111111111111111111111",
+];
+
+const MAP_W = RAW_MAP[0].length;
+const MAP_H = RAW_MAP.length;
+const MAP = RAW_MAP.map(r => r.split('').map(Number));
+
+function mapAt(x, y) {
+  const ix = Math.floor(x), iy = Math.floor(y);
+  if (ix < 0 || iy < 0 || ix >= MAP_W || iy >= MAP_H) return 1;
+  return MAP[iy][ix];
+}
+
+// ── PLAYER ──────────────────────────────────────────────────────
+const player = {
+  x: 2.5, y: 2.5,
+  angle: 0,
+  hp: 100,
+  kills: 0,
+  wave: 1,
+  lastShot: 0,
+  shootAnim: 0,   // countdown frames for muzzle flash
+  hitAnim: 0,
+};
+
+// ── ENEMIES ─────────────────────────────────────────────────────
+const ENEMY_TYPES = [
+  { glyph: 0b01111110_10000001_10100101_10000001_10100101_10011001_10000001_01111110, hp: 30, speed: 0.013, dmg: 8,  color: 0 },
+  { glyph: 0b00111100_01111110_11011011_11111111_11111111_11011011_01111110_00111100, hp: 60, speed: 0.009, dmg: 15, color: 1 },
+  { glyph: 0b11111111_10000001_10111101_10100101_10100101_10111101_10000001_11111111, hp: 100,speed: 0.007, dmg: 25, color: 2 },
+];
+
+let enemies = [];
+let frameCount = 0;
+let glitchTimer = 0;
+let globalNoise = 0;   // 0..1, rises during combat
+let waveTimer = 0;
+
+function spawnEnemy() {
+  if (enemies.length >= CFG.MAX_ENEMIES) return;
+  const type = ENEMY_TYPES[Math.min(player.wave - 1, ENEMY_TYPES.length - 1)];
+  // Find a valid floor spawn
+  for (let attempt = 0; attempt < 50; attempt++) {
+    const ex = 1 + Math.random() * (MAP_W - 2);
+    const ey = 1 + Math.random() * (MAP_H - 2);
+    if (mapAt(ex, ey) === 0) {
+      const dx = ex - player.x, dy = ey - player.y;
+      if (Math.sqrt(dx*dx+dy*dy) > 4) {
+        enemies.push({
+          x: ex, y: ey,
+          hp: type.hp, maxHp: type.hp,
+          type: player.wave > 2 ? 2 : player.wave > 1 ? 1 : 0,
+          dead: false,
+          distortPhase: Math.random() * Math.PI * 2,
+          glitchLevel: 0,
+          lastDmgTime: 0,
+        });
+        return;
+      }
+    }
+  }
+}
+
+function spawnWave() {
+  const count = 3 + player.wave * 2;
+  for (let i = 0; i < count; i++) spawnEnemy();
+}
+
+// ── QR MATRIX BUFFER ────────────────────────────────────────────
+// The "framebuffer" is a 2D array of values 0..255
+// We then threshold/dither/encode this into QR modules
+const FB = new Float32Array(CFG.COLS * CFG.ROWS);
+const DISTORT = new Float32Array(CFG.COLS * CFG.ROWS);  // distortion overlay
+const GLITCH  = new Uint8Array(CFG.COLS * CFG.ROWS);    // glitch bits
+
+function fbIdx(col, row) { return row * CFG.COLS + col; }
+
+function fbSet(col, row, v) {
+  if (col < 0 || row < 0 || col >= CFG.COLS || row >= CFG.ROWS) return;
+  FB[fbIdx(col, row)] = v;
+}
+
+function fbGet(col, row) {
+  if (col < 0 || row < 0 || col >= CFG.COLS || row >= CFG.ROWS) return 0;
+  return FB[fbIdx(col, row)];
+}
+
+// ── QR FINDER PATTERNS ──────────────────────────────────────────
+// Classic 7×7 QR finder pattern (top-left, top-right, bottom-left)
+const FINDER = [
+  [1,1,1,1,1,1,1],
+  [1,0,0,0,0,0,1],
+  [1,0,1,1,1,0,1],
+  [1,0,1,1,1,0,1],
+  [1,0,1,1,1,0,1],
+  [1,0,0,0,0,0,1],
+  [1,1,1,1,1,1,1],
+];
+
+function stampFinder(col0, row0, scale, flipped) {
+  for (let r = 0; r < 7; r++) {
+    for (let c = 0; c < 7; c++) {
+      let v = FINDER[r][c];
+      if (flipped) v = 1 - v;
+      for (let dr = 0; dr < scale; dr++)
+        for (let dc = 0; dc < scale; dc++)
+          fbSet(col0 + c*scale + dc, row0 + r*scale + dr, v);
+    }
+  }
+}
+
+// Timing pattern (alternating B/W strip)
+function stampTiming(col0, row0, len, horiz) {
+  for (let i = 0; i < len; i++) {
+    const v = (i % 2 === 0) ? 1 : 0;
+    if (horiz) fbSet(col0 + i, row0, v);
+    else        fbSet(col0, row0 + i, v);
+  }
+}
+
+// ── NOISE / CORRUPTION ──────────────────────────────────────────
+function noise2d(x, y, seed) {
+  let n = Math.sin(x * 127.1 + y * 311.7 + seed * 74.3) * 43758.5453;
+  return n - Math.floor(n);
+}
+
+function fbAddNoise(amount, seed) {
+  for (let r = 0; r < CFG.ROWS; r++) {
+    for (let c = 0; c < CFG.COLS; c++) {
+      if (noise2d(c, r, seed) < amount) {
+        FB[fbIdx(c, r)] ^= 1;
+      }
+    }
+  }
+}
+
+// ── RAYCASTING ENGINE ────────────────────────────────────────────
+// Returns array of { dist, wallType, side } per column
+function castRays() {
+  const rays = [];
+  const halfFov = CFG.FOV / 2;
+
+  for (let col = 0; col < CFG.COLS; col++) {
+    const rayAngle = player.angle - halfFov + (col / CFG.COLS) * CFG.FOV;
+    const rdx = Math.cos(rayAngle);
+    const rdy = Math.sin(rayAngle);
+
+    let mapX = Math.floor(player.x);
+    let mapY = Math.floor(player.y);
+
+    const ddx = Math.abs(1 / rdx);
+    const ddy = Math.abs(1 / rdy);
+
+    let stepX, stepY, sideDistX, sideDistY;
+
+    if (rdx < 0) { stepX = -1; sideDistX = (player.x - mapX) * ddx; }
+    else          { stepX =  1; sideDistX = (mapX + 1 - player.x) * ddx; }
+    if (rdy < 0) { stepY = -1; sideDistY = (player.y - mapY) * ddy; }
+    else          { stepY =  1; sideDistY = (mapY + 1 - player.y) * ddy; }
+
+    let hit = false, side = 0, wallType = 1;
+    for (let step = 0; step < 64 && !hit; step++) {
+      if (sideDistX < sideDistY) {
+        sideDistX += ddx; mapX += stepX; side = 0;
+      } else {
+        sideDistY += ddy; mapY += stepY; side = 1;
+      }
+      const w = mapAt(mapX, mapY);
+      if (w > 0) { hit = true; wallType = w; }
+    }
+
+    const dist = side === 0
+      ? (mapX - player.x + (1 - stepX) / 2) / rdx
+      : (mapY - player.y + (1 - stepY) / 2) / rdy;
+
+    rays.push({ dist: Math.max(0.01, dist), wallType, side });
+  }
+  return rays;
+}
+
+// ── ENEMY PROJECTION ────────────────────────────────────────────
+function projectEnemies(rays) {
+  const projected = [];
+
+  for (const e of enemies) {
+    if (e.dead) continue;
+    const dx = e.x - player.x;
+    const dy = e.y - player.y;
+    const dist = Math.sqrt(dx*dx + dy*dy);
+
+    // Angle relative to player
+    let angle = Math.atan2(dy, dx) - player.angle;
+    while (angle >  Math.PI) angle -= Math.PI * 2;
+    while (angle < -Math.PI) angle += Math.PI * 2;
+
+    if (Math.abs(angle) > CFG.FOV * 0.7) continue;
+
+    const screenX = Math.floor((0.5 + angle / CFG.FOV) * CFG.COLS);
+    const h = Math.floor(CFG.ROWS / dist);
+    const top = Math.floor((CFG.ROWS - h) / 2);
+
+    // Check occlusion
+    const visRays = Math.floor(h / 2);
+    let visible = false;
+    for (let i = -visRays; i <= visRays; i++) {
+      const c = screenX + i;
+      if (c >= 0 && c < CFG.COLS && rays[c] && rays[c].dist > dist) {
+        visible = true; break;
+      }
+    }
+    if (!visible) continue;
+
+    projected.push({ e, screenX, h, top, dist, angle });
+  }
+
+  // Sort back-to-front
+  projected.sort((a, b) => b.dist - a.dist);
+  return projected;
+}
+
+// ── QR RENDER FRAME ─────────────────────────────────────────────
+function renderFrame() {
+  FB.fill(0);
+  GLITCH.fill(0);
+
+  const rays = castRays();
+  const t = frameCount * 0.05;
+
+  // ── 1. SKY / CEILING (QR timing pattern style) ──────────────
+  for (let r = 0; r < Math.floor(CFG.ROWS / 2); r++) {
+    for (let c = 0; c < CFG.COLS; c++) {
+      // Alternating pattern that shifts with player angle
+      const shift = Math.floor(player.angle * 8) & 1;
+      const v = ((c + r + shift) % 2 === 0) ? 0.15 : 0;
+      FB[fbIdx(c, r)] = v;
+    }
+  }
+
+  // ── 2. FLOOR (denser encoding-style pattern) ─────────────────
+  for (let r = Math.floor(CFG.ROWS / 2); r < CFG.ROWS; r++) {
+    for (let c = 0; c < CFG.COLS; c++) {
+      const floorDist = CFG.ROWS / (2 * r - CFG.ROWS + 1);
+      const noiseVal = noise2d(c + player.x * 4, r + player.y * 4, Math.floor(t * 0.5)) * 0.3;
+      FB[fbIdx(c, r)] = (floorDist < 2 ? 0.6 : 0.3) + noiseVal;
+    }
+  }
+
+  // ── 3. WALLS ─────────────────────────────────────────────────
+  for (let col = 0; col < CFG.COLS; col++) {
+    const ray = rays[col];
+    const wallH = Math.floor(CFG.ROWS / ray.dist);
+    const wallTop = Math.floor((CFG.ROWS - wallH) / 2);
+    const wallBot = wallTop + wallH;
+
+    for (let row = Math.max(0, wallTop); row < Math.min(CFG.ROWS, wallBot); row++) {
+      // Wall encoding: depends on distance, side, wall type
+      // Far walls = sparse modules, close walls = dense modules
+      const density = Math.min(1, 1 / ray.dist);
+      const phase = row * 0.7 + col * 0.3 + ray.wallType * 17;
+      const checkered = (Math.floor(row * density * 2) + Math.floor(col * density * 2)) % 2;
+      let v = checkered ? 1 : 0;
+
+      // Side shading (NS walls darker → sparser)
+      if (ray.side === 1) v *= 0.5;
+
+      // Distance fog: far = more noise corruption
+      const fog = Math.max(0, ray.dist / CFG.DEPTH);
+      if (noise2d(col, row, frameCount * 0.01) < fog * 0.5) v = 1 - v;
+
+      FB[fbIdx(col, row)] = v;
+    }
+  }
+
+  // ── 4. ENEMIES ───────────────────────────────────────────────
+  const projected = projectEnemies(rays);
+
+  for (const { e, screenX, h, top, dist } of projected) {
+    const type = ENEMY_TYPES[e.type];
+    const half = Math.floor(h / 2);
+    const glitch = e.glitchLevel;
+
+    for (let dc = -half; dc <= half; dc++) {
+      const col = screenX + dc;
+      if (col < 0 || col >= CFG.COLS) continue;
+
+      // Sample from the glyph pattern
+      const glyphC = Math.floor((dc + half) / (h || 1) * 8);
+
+      for (let dr = 0; dr < h; dr++) {
+        const row = top + dr;
+        if (row < 0 || row >= CFG.ROWS) continue;
+        if (rays[col] && rays[col].dist < dist) continue;
+
+        const glyphR = Math.floor(dr / (h || 1) * 8);
+        const bitIdx = glyphR * 8 + glyphC;
+        let bit = (type.glyph >>> (63 - bitIdx)) & 1;
+
+        // Distortion near player
+        if (dist < 3) {
+          const distortStrength = (3 - dist) / 3;
+          const wave = Math.sin(row * 0.5 + frameCount * 0.2 + e.distortPhase) * distortStrength * 2;
+          bit = ((col + Math.floor(wave)) % 2 === 0) ? bit : 1 - bit;
+        }
+
+        // Glitch corruption when damaged
+        if (glitch > 0 && noise2d(col, row, frameCount) < glitch) bit = 1 - bit;
+
+        FB[fbIdx(col, row)] = bit;
+        GLITCH[fbIdx(col, row)] = 1;
+      }
+    }
+
+    // Distort QR region around close enemies
+    if (dist < 4) {
+      const strength = (4 - dist) / 4;
+      for (let dc = -half * 2; dc <= half * 2; dc++) {
+        for (let dr = -Math.floor(h * 0.1); dr <= Math.floor(h * 0.1); dr++) {
+          const col = screenX + dc;
+          const row = top + Math.floor(h / 2) + dr;
+          if (col < 0 || col >= CFG.COLS || row < 0 || row >= CFG.ROWS) continue;
+          if (noise2d(col, row, frameCount * 0.3) < strength * 0.4 && !GLITCH[fbIdx(col, row)]) {
+            FB[fbIdx(col, row)] = 1 - FB[fbIdx(col, row)];
+          }
+        }
+      }
+    }
+  }
+
+  // ── 5. QR STRUCTURE OVERLAY ──────────────────────────────────
+  // Finder patterns in corners (always present, corrupted slightly)
+  const scale = 1;
+  const flip = (frameCount >> 6) & 1;
+
+  stampFinder(0, 0, scale, false);
+  stampFinder(CFG.COLS - 7, 0, scale, flip);
+  stampFinder(0, CFG.ROWS - 7, scale, flip);
+
+  // Timing strips (horizontal / vertical between finders)
+  stampTiming(7, 6, CFG.COLS - 14, true);
+  stampTiming(6, 7, CFG.ROWS - 14, false);
+
+  // ── 6. MUZZLE FLASH ──────────────────────────────────────────
+  if (player.shootAnim > 0) {
+    const flashSize = player.shootAnim * 3;
+    const cx = Math.floor(CFG.COLS / 2);
+    const cy = Math.floor(CFG.ROWS * 0.6);
+    for (let r = cy - flashSize; r <= cy + flashSize; r++) {
+      for (let c = cx - flashSize; c <= cx + flashSize; c++) {
+        if (c < 0||c>=CFG.COLS||r<0||r>=CFG.ROWS) continue;
+        const d = Math.abs(c-cx)+Math.abs(r-cy);
+        if (d <= flashSize) {
+          FB[fbIdx(c, r)] = ((c + r + frameCount) % 2 === 0) ? 1 : 0.5;
+        }
+      }
+    }
+    player.shootAnim--;
+  }
+
+  // ── 7. WEAPON SILHOUETTE ─────────────────────────────────────
+  drawWeapon();
+
+  // ── 8. GLOBAL NOISE / CORRUPTION ─────────────────────────────
+  if (globalNoise > 0) {
+    fbAddNoise(globalNoise * 0.08, frameCount * 7.3);
+  }
+
+  // Scanline glitch rows
+  if (Math.random() < 0.04 + globalNoise * 0.1) {
+    const glitchRow = Math.floor(Math.random() * CFG.ROWS);
+    const shift = Math.floor((Math.random() - 0.5) * 8);
+    for (let c = 0; c < CFG.COLS; c++) {
+      FB[fbIdx(c, glitchRow)] = FB[fbIdx(Math.max(0, c + shift), glitchRow)];
+    }
+  }
+
+  // ── 9. HIT FLASH CORRUPTION ──────────────────────────────────
+  if (player.hitAnim > 0) {
+    fbAddNoise(0.2, frameCount * 91.7);
+    player.hitAnim--;
+  }
+
+  // ── 10. HEALTH CRITICAL NOISE ────────────────────────────────
+  if (player.hp < 30) {
+    const critLevel = (30 - player.hp) / 30;
+    fbAddNoise(critLevel * 0.15, Math.floor(t));
+  }
+}
+
+// ── WEAPON DRAWING ───────────────────────────────────────────────
+function drawWeapon() {
+  // Draw a QR-pixelated gun silhouette at bottom-center
+  const cx = Math.floor(CFG.COLS / 2);
+  const cy = CFG.ROWS - 1;
+  const bob = Math.sin(frameCount * 0.08) * 1.5;
+  const baseY = Math.floor(cy - 6 + bob);
+
+  // Barrel
+  for (let r = baseY - 8; r <= baseY; r++) {
+    for (let c = cx - 1; c <= cx + 1; c++) {
+      if (c < 0||c>=CFG.COLS||r<0||r>=CFG.ROWS) continue;
+      FB[fbIdx(c, r)] = (r + c) % 2 === 0 ? 1 : 0;
+    }
+  }
+  // Body
+  for (let r = baseY; r <= baseY + 5; r++) {
+    for (let c = cx - 6; c <= cx + 6; c++) {
+      if (c < 0||c>=CFG.COLS||r<0||r>=CFG.ROWS) continue;
+      if (r >= baseY && r <= baseY + 5 && c >= cx - 6 && c <= cx + 6) {
+        FB[fbIdx(c, r)] = (Math.floor(r / 2) + Math.floor(c / 2)) % 2 === 0 ? 1 : 0;
+      }
+    }
+  }
+  // Handle
+  for (let r = baseY + 2; r <= baseY + 7; r++) {
+    for (let c = cx - 2; c <= cx + 2; c++) {
+      if (c < 0||c>=CFG.COLS||r<0||r>=CFG.ROWS) continue;
+      FB[fbIdx(c, r)] = 1;
+    }
+  }
+}
+
+// ── CANVAS OUTPUT ────────────────────────────────────────────────
+const canvas = $('qr-canvas');
+const ctx = canvas.getContext('2d');
+canvas.width  = CFG.COLS * CFG.QSIZE;
+canvas.height = CFG.ROWS * CFG.QSIZE;
+
+// Greens palette: dark bg, bright modules, enemy glow
+const COLORS = {
+  bg:   '#000000',
+  dark: '#050a05',
+  mid:  '#0a1a0a',
+  wall: '#0d2e0d',
+  on:   '#00ff41',    // bright QR module
+  half: '#005514',
+  enemy0: '#00ff41',
+  enemy1: '#ffff00',
+  enemy2: '#ff4400',
+  flash:  '#ffffff',
+};
+
+function renderToCanvas() {
+  ctx.fillStyle = COLORS.bg;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  const imgData = ctx.createImageData(canvas.width, canvas.height);
+  const d = imgData.data;
+
+  for (let row = 0; row < CFG.ROWS; row++) {
+    for (let col = 0; col < CFG.COLS; col++) {
+      const v = FB[fbIdx(col, row)];
+      const isGlitch = GLITCH[fbIdx(col, row)];
+
+      // Color mapping
+      let r8, g8, b8;
+
+      if (v >= 0.9) {
+        if (isGlitch) {
+          // Enemy module — slight color tint based on type
+          r8 = 0; g8 = 255; b8 = 65;
+        } else if (row < 7 || row >= CFG.ROWS - 7 || col < 7 || col >= CFG.COLS - 7) {
+          // Finder pattern — pure white
+          r8 = 220; g8 = 255; b8 = 220;
+        } else {
+          r8 = 0; g8 = 200 + Math.floor(Math.random() * 55); b8 = 40;
+        }
+      } else if (v >= 0.5) {
+        r8 = 0; g8 = 80; b8 = 20;
+      } else if (v >= 0.1) {
+        r8 = 0; g8 = 30; b8 = 8;
+      } else {
+        r8 = 0; g8 = 5; b8 = 1;
+      }
+
+      // Write QSIZE×QSIZE block
+      for (let qr = 0; qr < CFG.QSIZE; qr++) {
+        for (let qc = 0; qc < CFG.QSIZE; qc++) {
+          const px = (row * CFG.QSIZE + qr) * canvas.width + (col * CFG.QSIZE + qc);
+          const i = px * 4;
+          // Tiny random flicker within module
+          const flicker = (qr === 0 || qc === 0) ? 0.85 : 1;
+          d[i]   = r8 * flicker;
+          d[i+1] = g8 * flicker;
+          d[i+2] = b8 * flicker;
+          d[i+3] = 255;
+        }
+      }
+    }
+  }
+
+  ctx.putImageData(imgData, 0, 0);
+
+  // Scanline overlay
+  ctx.fillStyle = 'rgba(0,0,0,0.08)';
+  for (let y = 0; y < canvas.height; y += 4) {
+    ctx.fillRect(0, y, canvas.width, 2);
+  }
+}
+
+// ── INPUT ────────────────────────────────────────────────────────
+const keys = {};
+let mouseX = 0;
+let pointerLocked = false;
+
+document.addEventListener('keydown', e => { keys[e.code] = true; });
+document.addEventListener('keyup',   e => { keys[e.code] = false; });
+
+document.addEventListener('mousemove', e => {
+  if (!pointerLocked) return;
+  player.angle += e.movementX * CFG.MOUSE_SENS;
+});
+
+canvas.addEventListener('click', () => {
+  canvas.requestPointerLock();
+});
+
+document.addEventListener('pointerlockchange', () => {
+  pointerLocked = document.pointerLockElement === canvas;
+});
+
+document.addEventListener('mousedown', e => {
+  if (e.button === 0) shoot();
+});
+
+document.addEventListener('keydown', e => {
+  if (e.code === 'Space') shoot();
+});
+
+// ── SHOOTING ────────────────────────────────────────────────────
+function shoot() {
+  const now = Date.now();
+  if (now - player.lastShot < CFG.SHOOT_COOLDOWN) return;
+  player.lastShot = now;
+  player.shootAnim = 6;
+
+  // Hitscan: find closest enemy in crosshair
+  let best = null, bestDist = Infinity;
+  for (const e of enemies) {
+    if (e.dead) continue;
+    const dx = e.x - player.x, dy = e.y - player.y;
+    const dist = Math.sqrt(dx*dx + dy*dy);
+    let angle = Math.atan2(dy, dx) - player.angle;
+    while (angle >  Math.PI) angle -= Math.PI * 2;
+    while (angle < -Math.PI) angle += Math.PI * 2;
+    if (Math.abs(angle) < 0.12 && dist < bestDist && dist < CFG.DEPTH) {
+      best = e; bestDist = dist;
+    }
+  }
+
+  if (best) {
+    const dmg = 20 + Math.floor(Math.random() * 15);
+    best.hp -= dmg;
+    best.glitchLevel = Math.min(1, best.glitchLevel + 0.4);
+    best.lastDmgTime = Date.now();
+    if (best.hp <= 0) {
+      best.dead = true;
+      player.kills++;
+      updateHUD();
+      showMsg(`[ ENTITY ${player.kills} CORRUPTED ]`, 800);
+      globalNoise = Math.min(1, globalNoise + 0.1);
+    }
+  }
+}
+
+// ── ENEMY AI ────────────────────────────────────────────────────
+function updateEnemies() {
+  const now = Date.now();
+  for (const e of enemies) {
+    if (e.dead) continue;
+
+    // Move toward player
+    const dx = player.x - e.x, dy = player.y - e.y;
+    const dist = Math.sqrt(dx*dx + dy*dy);
+    const type = ENEMY_TYPES[e.type];
+    const speed = type.speed * (1 + player.wave * 0.1);
+
+    if (dist > 0.6) {
+      const nx = dx / dist, ny = dy / dist;
+      const nx2 = e.x + nx * speed;
+      const ny2 = e.y + ny * speed;
+      if (mapAt(nx2, e.y) === 0) e.x = nx2;
+      if (mapAt(e.x, ny2) === 0) e.y = ny2;
+    } else {
+      // Attack
+      if (now - e.lastDmgTime > 1000) {
+        player.hp -= type.dmg;
+        player.hitAnim = 4;
+        e.lastDmgTime = now;
+        flashDamage();
+        if (player.hp <= 0) gameOver();
+        updateHUD();
+      }
+    }
+
+    // Decay glitch
+    e.glitchLevel = Math.max(0, e.glitchLevel - 0.01);
+    e.distortPhase += 0.03;
+  }
+
+  // Decay global noise
+  globalNoise = Math.max(0, globalNoise - 0.005);
+}
+
+// ── PLAYER MOVEMENT ─────────────────────────────────────────────
+function updatePlayer() {
+  const speed = CFG.MOVE_SPEED;
+  const rot   = CFG.ROT_SPEED;
+
+  if (keys['ArrowLeft']  || keys['KeyA']) player.angle -= rot;
+  if (keys['ArrowRight'] || keys['KeyD']) player.angle += rot;
+
+  const cos = Math.cos(player.angle), sin = Math.sin(player.angle);
+
+  if (keys['ArrowUp'] || keys['KeyW']) {
+    const nx = player.x + cos * speed;
+    const ny = player.y + sin * speed;
+    if (mapAt(nx, player.y) === 0) player.x = nx;
+    if (mapAt(player.x, ny) === 0) player.y = ny;
+  }
+  if (keys['ArrowDown'] || keys['KeyS']) {
+    const nx = player.x - cos * speed;
+    const ny = player.y - sin * speed;
+    if (mapAt(nx, player.y) === 0) player.x = nx;
+    if (mapAt(player.x, ny) === 0) player.y = ny;
+  }
+
+  // Strafe
+  if (keys['KeyQ']) {
+    const nx = player.x - sin * speed, ny = player.y + cos * speed;
+    if (mapAt(nx, player.y) === 0) player.x = nx;
+    if (mapAt(player.x, ny) === 0) player.y = ny;
+  }
+  if (keys['KeyE']) {
+    const nx = player.x + sin * speed, ny = player.y - cos * speed;
+    if (mapAt(nx, player.y) === 0) player.x = nx;
+    if (mapAt(player.x, ny) === 0) player.y = ny;
+  }
+}
+
+// ── WAVE LOGIC ──────────────────────────────────────────────────
+function updateWave() {
+  const alive = enemies.filter(e => !e.dead).length;
+  if (alive === 0) {
+    waveTimer++;
+    if (waveTimer > 120) {
+      waveTimer = 0;
+      player.wave++;
+      enemies = [];
+      spawnWave();
+      updateHUD();
+      showMsg(`[ WAVE ${player.wave} INITIALIZED ]`, 1500);
+    }
+  } else {
+    waveTimer = 0;
+  }
+}
+
+// ── HUD & MESSAGES ───────────────────────────────────────────────
+function updateHUD() {
+  const hpEl = $('hud-hp');
+  hpEl.textContent = Math.max(0, player.hp);
+  hpEl.className = 'hud-value' + (player.hp < 30 ? ' danger' : '');
+  $('hud-kills').textContent = String(player.kills).padStart(3, '0');
+  $('hud-wave').textContent = String(player.wave).padStart(2, '0');
+}
+
+let msgTimeout = null;
+function showMsg(text, duration) {
+  const el = $('msg');
+  el.textContent = text;
+  el.style.opacity = '1';
+  if (msgTimeout) clearTimeout(msgTimeout);
+  msgTimeout = setTimeout(() => { el.style.opacity = '0'; }, duration);
+}
+
+function flashDamage() {
+  const el = $('damage-flash');
+  el.style.background = 'rgba(255,0,0,0.35)';
+  setTimeout(() => { el.style.background = 'rgba(255,0,0,0)'; }, 120);
+}
+
+function gameOver() {
+  showMsg('[ PROCESS TERMINATED ]\n\nQR://DOOM CORE DUMP\n\nREFRESH TO REINITIALIZE', 99999);
+  gameRunning = false;
+}
+
+// ── MINI MAP QR ─────────────────────────────────────────────────
+// Encode position as a mini QR-like matrix in corner
+const miniCanvas = document.createElement('canvas');
+miniCanvas.width = 80; miniCanvas.height = 80;
+miniCanvas.id = 'qr-mini';
+miniCanvas.style.cssText = 'position:fixed;bottom:90px;right:10px;width:80px;height:80px;z-index:20;display:none;image-rendering:pixelated;border:1px solid #0a0;';
+document.body.appendChild(miniCanvas);
+const miniCtx = miniCanvas.getContext('2d');
+
+function renderMiniMap() {
+  miniCtx.fillStyle = '#000';
+  miniCtx.fillRect(0, 0, 80, 80);
+  const cellW = 80 / MAP_W, cellH = 80 / MAP_H;
+  for (let y = 0; y < MAP_H; y++) {
+    for (let x = 0; x < MAP_W; x++) {
+      if (MAP[y][x]) {
+        miniCtx.fillStyle = (x + y) % 2 === 0 ? '#0f0' : '#050';
+        miniCtx.fillRect(x * cellW, y * cellH, cellW - 0.5, cellH - 0.5);
+      }
+    }
+  }
+  // Player
+  miniCtx.fillStyle = '#fff';
+  miniCtx.fillRect(player.x * cellW - 1.5, player.y * cellH - 1.5, 3, 3);
+  // Player dir
+  miniCtx.strokeStyle = '#fff';
+  miniCtx.beginPath();
+  miniCtx.moveTo(player.x * cellW, player.y * cellH);
+  miniCtx.lineTo((player.x + Math.cos(player.angle) * 1.5) * cellW, (player.y + Math.sin(player.angle) * 1.5) * cellH);
+  miniCtx.stroke();
+  // Enemies
+  for (const e of enemies) {
+    if (e.dead) continue;
+    miniCtx.fillStyle = '#f00';
+    miniCtx.fillRect(e.x * cellW - 1, e.y * cellH - 1, 2, 2);
+  }
+}
+
+// ── MAIN LOOP ────────────────────────────────────────────────────
+let gameRunning = false;
+
+function gameLoop() {
+  if (!gameRunning) return;
+  frameCount++;
+
+  updatePlayer();
+  updateEnemies();
+  updateWave();
+  renderFrame();
+  renderToCanvas();
+  renderMiniMap();
+
+  requestAnimationFrame(gameLoop);
+}
+
+// ── BOOT SEQUENCE ────────────────────────────────────────────────
+const BOOT_LINES = [
+  "QR://DOOM KERNEL v0.00.1 — FORBIDDEN BUILD",
+  "WARNING: THIS SOFTWARE WAS NOT INTENDED TO EXIST",
+  "",
+  "Initializing QR render pipeline............... OK",
+  "Loading raycasting engine..................... OK",
+  "Calibrating module encoding system............ OK",
+  "Injecting corruption artifacts................ OK",
+  "Spawning hostile data entities................ OK",
+  "Generating forbidden geometry................. OK",
+  "Bypassing scan verification................... OK",
+  "Installing glitch subsystem................... OK",
+  "Corrupting finder patterns (on purpose)....... OK",
+  "Establishing hitscan protocol................. OK",
+  "",
+  "SYSTEM INTEGRITY: [██░░░░░░░░] 18%",
+  "CORRUPTION LEVEL: ACCEPTABLE",
+  "QR MATRIX STATUS: CURSED",
+  "",
+  ">> This build was recovered from an abandoned server.",
+  ">> The original developer cannot be located.",
+  ">> All scanned QR codes returned ERROR 404.",
+  "",
+  "Controls: WASD = move  QE = strafe  Mouse/Arrows = look",
+  "          CLICK = shoot   SPACE = shoot",
+  "",
+];
+
+function runBoot() {
+  const el = $('boot-text');
+  let i = 0;
+  let text = '';
+
+  function nextLine() {
+    if (i >= BOOT_LINES.length) {
+      $('start-prompt').style.display = 'block';
+      document.addEventListener('keydown', startGame, { once: true });
+      document.addEventListener('mousedown', startGame, { once: true });
+      return;
+    }
+    const line = BOOT_LINES[i++];
+    text += line + '\n';
+    el.textContent = text;
+    setTimeout(nextLine, line.length > 0 ? 60 : 120);
+  }
+
+  nextLine();
+}
+
+function startGame() {
+  $('boot-screen').style.display = 'none';
+  $('game-container').style.display = 'flex';
+  $('hud').style.display = 'flex';
+  $('crosshair').style.display = 'block';
+  miniCanvas.style.display = 'block';
+
+  spawnWave();
+  updateHUD();
+  showMsg('[ WAVE 1 INITIALIZED — SURVIVE ]', 2000);
+
+  gameRunning = true;
+  requestAnimationFrame(gameLoop);
+
+  // Auto-request pointer lock
+  setTimeout(() => canvas.requestPointerLock(), 200);
+}
+
+// ── INIT ────────────────────────────────────────────────────────
+runBoot();
+</script>
+</body>
+</html>
